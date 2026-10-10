@@ -1,0 +1,51 @@
+{
+  "name": "MediKiosk — AI Clinical History Intake",
+  "short_name": "MediKiosk",
+  "description": "AI-powered clinical history intake platform for hospital OPDs in India, featuring self-service patient kiosk and doctor dashboard.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "en",
+  "dir": "ltr",
+  "theme_color": "#0d9488",
+  "background_color": "#f8fafc",
+  "categories": ["medical", "health", "business"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Patient Intake",
+      "short_name": "New Intake",
+      "description": "Start a new patient kiosk intake session",
+      "url": "/",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Doctor Portal",
+      "short_name": "Doctors",
+      "description": "Open the doctor EMR and OPD queue portal",
+      "url": "/#doctor",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

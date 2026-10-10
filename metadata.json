@@ -1,0 +1,6 @@
+{
+  "name": "MediKiosk",
+  "description": "AI-powered clinical history intake platform for hospital OPDs in India, featuring self-service patient kiosk and doctor dashboard.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
