@@ -1,22 +1,32 @@
 // Staff session tokens: HMAC-signed, stateless, Vercel-safe.
+// Uses the Web Crypto API (no Node 'crypto' import) so the same module
+// bundles cleanly for Node.js serverless, edge runtimes, and local tsx.
 // Kiosk endpoints stay public by design (public self-service terminal).
 // Staff endpoints (status changes, prescriptions, queue clear, drug checks)
 // require `Authorization: Bearer <token>` issued by /api/doctors/verify.
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { getEnv } from './store';
 
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours (one clinical shift)
+const subtle: SubtleCrypto | null =
+  typeof globalThis.crypto !== 'undefined' ? globalThis.crypto.subtle : null;
 
-export function sha256Hex(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
+function hexOf(bytes: ArrayBuffer): string {
+  return Array.from(new Uint8Array(bytes))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
-/** Constant-time hash comparison to avoid timing leaks on PIN checks. */
+export async function sha256Hex(text: string): Promise<string> {
+  if (!subtle) throw new Error('Web Crypto unavailable in this runtime');
+  return hexOf(await subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+
+/** Constant-time string comparison to avoid timing leaks on PIN checks. */
 export function hashesEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return timingSafeEqual(ba, bb);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 function sessionSecret(): string {
@@ -32,11 +42,29 @@ function sessionSecret(): string {
 }
 
 function b64urlEncode(obj: unknown): string {
-  return Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  let bin = '';
+  bytes.forEach((b) => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function b64urlDecode<T>(s: string): T {
-  return JSON.parse(Buffer.from(s, 'base64url').toString('utf8')) as T;
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+}
+
+async function hmacKey(): Promise<CryptoKey> {
+  if (!subtle) throw new Error('Web Crypto unavailable in this runtime');
+  return subtle.importKey(
+    'raw',
+    new TextEncoder().encode(sessionSecret()),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  );
 }
 
 export interface StaffTokenPayload {
@@ -45,22 +73,24 @@ export interface StaffTokenPayload {
   exp: number;
 }
 
-export function issueStaffToken(id: string, registrationNumber: string): string {
-  const payload = b64urlEncode({
-    id,
-    reg: registrationNumber,
-    exp: Date.now() + TOKEN_TTL_MS,
-  } satisfies StaffTokenPayload);
-  const sig = createHmac('sha256', sessionSecret()).update(payload).digest('base64url');
+export async function issueStaffToken(id: string, registrationNumber: string): Promise<string> {
+  const payload = b64urlEncode({ id, reg: registrationNumber, exp: Date.now() + TOKEN_TTL_MS });
+  const key = await hmacKey();
+  const sig = hexOf(await subtle!.sign('HMAC', key, new TextEncoder().encode(payload)));
   return `${payload}.${sig}`;
 }
 
-export function verifyStaffToken(token: string): StaffTokenPayload | null {
+export async function verifyStaffToken(token: string): Promise<StaffTokenPayload | null> {
   try {
     const [payload, sig] = token.split('.');
     if (!payload || !sig) return null;
-    const expected = createHmac('sha256', sessionSecret()).update(payload).digest('base64url');
-    if (!hashesEqual(sig, expected)) return null;
+    const key = await hmacKey();
+    const ok = await subtle!.verify(
+      'HMAC', key,
+      new Uint8Array(sig.match(/../g)!.map((h) => parseInt(h, 16))),
+      new TextEncoder().encode(payload),
+    );
+    if (!ok) return null;
     const data = b64urlDecode<StaffTokenPayload>(payload);
     if (!data.exp || data.exp < Date.now()) return null;
     return data;
@@ -78,7 +108,7 @@ export function getBearerToken(headers: Record<string, string | string[] | undef
 }
 
 /** Returns the verified token payload, or null when missing/invalid/expired. */
-export function requireStaff(headers: Record<string, string | string[] | undefined>): StaffTokenPayload | null {
+export async function requireStaff(headers: Record<string, string | string[] | undefined>): Promise<StaffTokenPayload | null> {
   const token = getBearerToken(headers);
   if (!token) return null;
   return verifyStaffToken(token);

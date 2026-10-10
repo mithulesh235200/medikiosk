@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'DELETE') {
     // Destructive staff action — requires verified staff session.
-    if (!requireStaff(req.headers as never)) {
+    if (!(await requireStaff(req.headers as never))) {
       return res.status(401).json({ error: 'Staff authentication required' });
     }
     await clearPatients();

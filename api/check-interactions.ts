@@ -5,7 +5,7 @@ import { requireStaff } from './_lib/auth';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!requireStaff(req.headers as never)) {
+  if (!(await requireStaff(req.headers as never))) {
     return res.status(401).json({ error: 'Staff authentication required' });
   }
   const { currentMedications = [], proposedPrescription = '', knownAllergies = [] } = req.body ?? {};

@@ -120,8 +120,8 @@ function publicDoctor(d: StaffDoctorRow) {
   return pub;
 }
 
-function checkStaff(req: express.Request, res: express.Response): boolean {
-  if (!requireStaff(req.headers as never)) {
+async function checkStaff(req: express.Request, res: express.Response): Promise<boolean> {
+  if (!(await requireStaff(req.headers as never))) {
     res.status(401).json({ error: 'Staff authentication required' });
     return false;
   }
@@ -145,7 +145,7 @@ app.get('/api/doctors', (req, res) => {
 });
 
 // Staff login verification — issues a signed session token
-app.post('/api/doctors/verify', (req, res) => {
+app.post('/api/doctors/verify', async (req, res) => {
   const { registrationNumber, pin } = req.body ?? {};
   if (!registrationNumber || !pin) {
     return res.status(400).json({ error: 'Registration number and PIN are required' });
@@ -156,15 +156,15 @@ app.post('/api/doctors/verify', (req, res) => {
   if (!doctor) {
     return res.status(404).json({ error: 'Doctor not found. Check the registration number or register as a custom doctor.' });
   }
-  if (!hashesEqual(sha256Hex(String(pin)), doctor.pinHash)) {
+  if (!hashesEqual(await sha256Hex(String(pin)), doctor.pinHash)) {
     return res.status(401).json({ error: 'Incorrect PIN for this registration number.' });
   }
-  const token = issueStaffToken(doctor.id, doctor.registrationNumber);
+  const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
   res.json({ doctor: publicDoctor(doctor), token });
 });
 
 // Custom doctor self-registration (disable in production via ALLOW_DOCTOR_SELF_REGISTER=false)
-app.post('/api/doctors/register', (req, res) => {
+app.post('/api/doctors/register', async (req, res) => {
   if (process.env.ALLOW_DOCTOR_SELF_REGISTER === 'false') {
     return res.status(403).json({ error: 'Self-registration is disabled. Ask the administrator to provision your account.' });
   }
@@ -182,12 +182,12 @@ app.post('/api/doctors/register', (req, res) => {
     department: String(department || 'General OPD').trim(),
     roomNumber: String(roomNumber).trim(),
     registrationNumber: String(registrationNumber).trim(),
-    pinHash: sha256Hex(String(pin)),
+    pinHash: await sha256Hex(String(pin)),
     active: true,
   };
   doctorStore.push(doctor);
   saveDoctorsToDisk(doctorStore);
-  const token = issueStaffToken(doctor.id, doctor.registrationNumber);
+  const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
   res.status(201).json({ doctor: publicDoctor(doctor), token });
 });
 
@@ -261,8 +261,8 @@ app.post('/api/patients', (req, res) => {
 });
 
 // Clear/Reset queue endpoint (staff only)
-app.delete('/api/patients', (req, res) => {
-  if (!checkStaff(req, res)) return;
+app.delete('/api/patients', async (req, res) => {
+  if (!(await checkStaff(req, res))) return;
   patientStore = [];
   savePatientsToDisk([]);
   console.log('[MediKiosk] Patient queue cleared by user.');
@@ -270,8 +270,8 @@ app.delete('/api/patients', (req, res) => {
 });
 
 // Update patient status (waiting, in_consultation, seen) — staff only
-app.patch('/api/patients/:id/status', (req, res) => {
-  if (!checkStaff(req, res)) return;
+app.patch('/api/patients/:id/status', async (req, res) => {
+  if (!(await checkStaff(req, res))) return;
   const { status } = req.body;
   const patient = patientStore.find((p) => p.id === req.params.id);
   if (!patient) {
@@ -289,8 +289,8 @@ app.patch('/api/patients/:id/status', (req, res) => {
 });
 
 // Doctor notes and prescription annotations — staff only
-app.patch('/api/patients/:id/annotate', (req, res) => {
-  if (!checkStaff(req, res)) return;
+app.patch('/api/patients/:id/annotate', async (req, res) => {
+  if (!(await checkStaff(req, res))) return;
   const { doctorNotes, doctorPrescription } = req.body;
   const patient = patientStore.find((p) => p.id === req.params.id);
   if (!patient) {
@@ -702,7 +702,7 @@ Respond ONLY with valid JSON strictly conforming to this structure:
 
 // Drug-Drug Interaction & Allergy Checker for Doctor Prescriptions — staff only
 app.post('/api/check-interactions', async (req, res) => {
-  if (!checkStaff(req, res)) return;
+  if (!(await checkStaff(req, res))) return;
   const { currentMedications = [], proposedPrescription = '', knownAllergies = [] } = req.body;
 
   const ai = getGeminiClient();

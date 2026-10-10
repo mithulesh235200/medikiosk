@@ -7,16 +7,21 @@ import { getDoctorByReg } from '../_lib/store';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { registrationNumber, pin } = req.body ?? {};
-  if (!registrationNumber || !pin) {
-    return res.status(400).json({ error: 'Registration number and PIN are required' });
+  try {
+    const { registrationNumber, pin } = req.body ?? {};
+    if (!registrationNumber || !pin) {
+      return res.status(400).json({ error: 'Registration number and PIN are required' });
+    }
+    const doctor = await getDoctorByReg(String(registrationNumber).trim());
+    if (!doctor) return res.status(404).json({ error: 'Doctor not found. Check the registration number or register as a custom doctor.' });
+    if (!hashesEqual(await sha256Hex(String(pin)), doctor.pinHash)) {
+      return res.status(401).json({ error: 'Incorrect PIN for this registration number.' });
+    }
+    const { pinHash: _omit, ...publicDoctor } = doctor;
+    const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
+    return res.status(200).json({ doctor: publicDoctor, token });
+  } catch (e) {
+    console.error('[verify] unhandled:', e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : 'Verification failed' });
   }
-  const doctor = await getDoctorByReg(String(registrationNumber).trim());
-  if (!doctor) return res.status(404).json({ error: 'Doctor not found. Check the registration number or register as a custom doctor.' });
-  if (!hashesEqual(sha256Hex(String(pin)), doctor.pinHash)) {
-    return res.status(401).json({ error: 'Incorrect PIN for this registration number.' });
-  }
-  const { pinHash: _omit, ...publicDoctor } = doctor;
-  const token = issueStaffToken(doctor.id, doctor.registrationNumber);
-  return res.status(200).json({ doctor: publicDoctor, token });
 }
