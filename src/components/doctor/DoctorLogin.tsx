@@ -173,7 +173,15 @@ export const DoctorLogin: React.FC<DoctorLoginProps> = ({
 
       if (!res.ok) {
         const err = await res.json().catch(() => null);
-        setErrorMsg(err?.error || 'Sign-in failed. Check your registration number and PIN.');
+        if (err?.error) {
+          setErrorMsg(err.error);
+        } else if (res.status === 404) {
+          setErrorMsg('Server API not reachable (HTTP 404). The deployment may have failed — check /api/health.');
+        } else if (res.status === 401) {
+          setErrorMsg('Incorrect PIN for this registration number.');
+        } else {
+          setErrorMsg(`Sign-in failed (HTTP ${res.status}). Check your registration number and PIN.`);
+        }
         setIsLoggingIn(false);
         return;
       }
