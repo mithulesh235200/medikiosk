@@ -1,21 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileCheck,
   Volume2,
   VolumeX,
-  AlertCircle,
   Pill,
   HeartPulse,
   Activity,
-  User,
-  Building,
   CheckCircle2,
-  Sparkles,
   ArrowRight,
-  RotateCcw,
-  Gauge,
-  Thermometer,
-  Stethoscope,
   ClipboardList,
 } from 'lucide-react';
 import {
@@ -54,110 +46,64 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
   const t = translations[language];
   const isHindi = language === 'hi';
 
-  const [summary, setSummary] = useState<StructuredClinicalSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
-  // Generate structured summary on mount
-  useEffect(() => {
-    let isMounted = true;
-
-    async function generateSummary() {
-      setIsLoading(true);
-      try {
-        const res = await fetch('/api/chat/summarize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            demographics,
-            conversation,
-            documents,
-            bodyRegion,
-            vitals,
-          }),
-        });
-
-        if (res.ok) {
-          const data: StructuredClinicalSummary = await res.json();
-          if (isMounted) {
-            setSummary(data);
-          }
-        } else {
-          throw new Error('Summary generation failed');
-        }
-      } catch (err) {
-        console.error('Summary error:', err);
-        if (isMounted) {
-          const patientNotes = conversation
-            .filter((m) => m.sender === 'patient')
-            .map((m) => m.text);
-          const firstComplaint = patientNotes[0] || 'OPD Clinical Consultation';
-          const isEmergency = conversation.some((m) => m.isRedFlag);
-
-          setSummary({
-            chiefComplaint: firstComplaint,
-            primaryBodyRegion: bodyRegion,
-            vitals,
-            historyOfPresentingIllness: {
-              symptomOnset: 'As reported during intake',
-              duration: patientNotes[1] || 'Recent',
-              severityScore: isEmergency ? 9 : 5,
-              character: 'Reported symptoms',
-              radiation: isEmergency ? 'Upper chest / left arm' : 'None reported',
-              associatedSymptoms: patientNotes.slice(1, 3),
-              aggravatingRelievingFactors: 'Evaluated by physician in OPD room',
-              narrative: `${demographics.name}, ${demographics.age} y/o presents with ${firstComplaint}.`,
-            },
-            pastMedicalSurgicalHistory: {
-              chronicConditions: patientNotes.length > 3 ? [patientNotes[3]] : ['None stated'],
-              pastSurgeries: ['None reported'],
-              hospitalizations: ['None recent'],
-            },
-            drugAndAllergyHistory: {
-              currentMedications: patientNotes.length > 4 ? [patientNotes[4]] : ['None reported'],
-              knownAllergies: ['NKDA'],
-            },
-            familyHistory: ['Non-contributory'],
-            personalSocialHistory: {
-              diet: 'Standard',
-              smokingOrTobacco: 'None stated',
-            },
-            reviewOfSystems: {
-              positiveFindings: [firstComplaint],
-              negativeFindings: ['No other acute signs'],
-            },
-            triageAssessment: {
-              level: isEmergency ? 'emergency' : 'routine',
-              isRedFlag: isEmergency,
-              redFlagReasons: isEmergency ? ['High-risk acute triage condition'] : [],
-              recommendedDepartment: isEmergency ? 'Emergency & Cardiology' : 'Internal Medicine / General OPD',
-              clinicalImpression: `Patient presenting with ${firstComplaint}.`,
-              differentialDiagnoses: [
-                {
-                  condition: firstComplaint,
-                  probability: 'high',
-                  rationale: 'Primary presenting complaint during kiosk interview.',
-                  icd10Code: 'R68.89',
-                },
-              ],
-              recommendedWorkup: ['Vitals check', 'Routine OPD investigations'],
-            },
-            patientPlainLanguageReadback: `Just to confirm, you are here for ${firstComplaint}. The doctor will review your history shortly.`,
-            patientPlainLanguageReadbackHindi: `पुष्टि के लिए: आप आज ${firstComplaint} की जांच कराने आए हैं। डॉक्टर जल्द ही आपकी जांच करेंगे।`,
-          });
-        }
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    }
-
-    generateSummary();
-
-    return () => {
-      isMounted = false;
-      stopSpeaking();
+  // Local-only summary — no AI / network call. Built directly from the
+  // patient's own interview answers so this step can never fail or hang.
+  const summary: StructuredClinicalSummary = useMemo(() => {
+    const patientNotes = conversation
+      .filter((m) => m.sender === 'patient')
+      .map((m) => m.text);
+    const firstComplaint = patientNotes[0] || 'OPD Clinical Consultation';
+    const isEmergency =
+      conversation.some((m) => m.isRedFlag) ||
+      (vitals?.spO2 != null && vitals.spO2 < 92) ||
+      (vitals?.systolicBp != null && vitals.systolicBp >= 180);
+    return {
+      chiefComplaint: firstComplaint,
+      primaryBodyRegion: bodyRegion,
+      vitals,
+      historyOfPresentingIllness: {
+        symptomOnset: 'As reported during intake',
+        duration: patientNotes[1] || 'Recent',
+        severityScore: isEmergency ? 9 : 5,
+        character: patientNotes[2] || 'Reported symptoms',
+        radiation: 'None reported',
+        associatedSymptoms: patientNotes.slice(1, 3),
+        aggravatingRelievingFactors: 'To be evaluated by physician in OPD room',
+        narrative: `${demographics.name}, ${demographics.age} y/o presents with ${firstComplaint}. Duration: ${patientNotes[1] || 'recent'}.`,
+      },
+      pastMedicalSurgicalHistory: {
+        chronicConditions: patientNotes.length > 3 ? [patientNotes[3]] : ['None stated'],
+        pastSurgeries: ['None reported'],
+        hospitalizations: ['None recent'],
+      },
+      drugAndAllergyHistory: {
+        currentMedications: patientNotes.length > 4 ? [patientNotes[4]] : ['None reported'],
+        knownAllergies: ['NKDA'],
+      },
+      familyHistory: patientNotes.length > 5 ? [patientNotes[5]] : ['Non-contributory'],
+      personalSocialHistory: {
+        diet: 'Standard',
+        smokingOrTobacco: 'None stated',
+      },
+      reviewOfSystems: {
+        positiveFindings: [firstComplaint],
+        negativeFindings: ['No other acute signs'],
+      },
+      triageAssessment: {
+        level: isEmergency ? 'emergency' : 'routine',
+        isRedFlag: isEmergency,
+        redFlagReasons: isEmergency ? ['High-risk acute triage condition'] : [],
+        recommendedDepartment: isEmergency ? 'Emergency' : 'Internal Medicine / General OPD',
+        clinicalImpression: `Patient presenting with ${firstComplaint}.`,
+        differentialDiagnoses: [],
+        recommendedWorkup: ['Vitals check', 'Routine OPD evaluation'],
+      },
+      patientPlainLanguageReadback: `Just to confirm, you are here for ${firstComplaint}. The doctor will review your history shortly.`,
+      patientPlainLanguageReadbackHindi: `पुष्टि के लिए: आप आज ${firstComplaint} की जांच कराने आए हैं। डॉक्टर जल्द ही आपकी जांच करेंगे।`,
     };
-  }, []);
+  }, [conversation, demographics.name, demographics.age, bodyRegion, vitals]);
 
   const handleToggleAudio = () => {
     if (isPlayingAudio) {
@@ -165,8 +111,6 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
       setIsPlayingAudio(false);
       return;
     }
-
-    if (!summary) return;
 
     const speechText =
       language === 'ta'
@@ -180,24 +124,6 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
       setIsPlayingAudio(false);
     });
   };
-
-  if (isLoading || !summary) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 py-16 text-center">
-        <div className="bg-white rounded-3xl p-10 shadow-sm border border-slate-200">
-          <div className="w-16 h-16 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
-            <Sparkles className="w-8 h-8" />
-          </div>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 mb-2">
-            Generating Clinical Intake Summary...
-          </h2>
-          <p className="text-slate-500 text-sm max-w-md mx-auto leading-relaxed">
-            Gemini Clinical Engine is structuring your symptoms, body map location, vitals, and documents into physician documentation.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   const isRedFlag = summary.triageAssessment.isRedFlag;
 
@@ -477,32 +403,6 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
                     <p className="font-bold text-slate-900 truncate">{doc.title}</p>
                     <p className="text-slate-500">{doc.aiInsights?.doctorOrFacility || 'OPD Record'}</p>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* INNOVATION: AI Clinical Co-Pilot Differential Diagnoses Preview */}
-        {summary.triageAssessment.differentialDiagnoses && summary.triageAssessment.differentialDiagnoses.length > 0 && (
-          <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2 flex items-center gap-1.5">
-              <Stethoscope className="w-3.5 h-3.5 text-blue-700" />
-              AI Clinical Differential Diagnoses (Physician Co-Pilot)
-            </h4>
-            <div className="space-y-2 text-xs">
-              {summary.triageAssessment.differentialDiagnoses.map((diff, idx) => (
-                <div key={idx} className="p-2.5 bg-white rounded-lg border border-blue-100 flex items-start justify-between gap-3">
-                  <div>
-                    <span className="font-bold text-slate-900">{diff.condition}</span>
-                    <span className="ml-2 font-mono text-[10px] text-slate-500">{diff.icd10Code}</span>
-                    <p className="text-slate-600 text-[11px] mt-0.5">{diff.rationale}</p>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
-                    diff.probability === 'high' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {diff.probability} probability
-                  </span>
                 </div>
               ))}
             </div>
