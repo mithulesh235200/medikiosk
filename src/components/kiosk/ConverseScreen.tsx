@@ -187,7 +187,78 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
     }
   };
 
-  // Client-side instant red-flag detector
+  // Progressive offline fallback — mirrors server.ts rule engine so the
+  // interview NEVER repeats the same question when /api is unreachable.
+  const getFallbackQuestion = (patientTurnCount: number) => {
+    if (patientTurnCount <= 1) {
+      return {
+        text: isHindi
+          ? 'यह तकलीफ आपको कितने दिनों या घंटों से हो रही है, और क्या यह लगातार बनी हुई है?'
+          : 'How long have you been experiencing this problem, and has it been getting worse or staying the same?',
+        quickReplies: isHindi
+          ? ['आज सुबह से (कुछ घंटे)', '2 से 3 दिनों से', '1 हफ्ते से अधिक समय से', 'काफी समय से']
+          : ['Since today morning', 'Past 2-3 days', 'More than 1 week', 'Chronic / past few months'],
+        category: 'hpi' as const,
+        progressPercent: 40,
+      };
+    }
+    if (patientTurnCount === 2) {
+      return {
+        text: isHindi
+          ? 'तकलीफ की गंभीरता 1 से 10 के पैमाने पर कितनी है, और क्या साथ में बुखार, उल्टी या चक्कर आ रहे हैं?'
+          : 'On a scale of 1 to 10, how severe is the pain/discomfort, and are you having any fever, vomiting, or dizziness?',
+        quickReplies: isHindi
+          ? ['हल्का (1-3)', 'मध्यम (4-6)', 'तेज़ (7-10)', 'बुखार भी है']
+          : ['Mild (1-3)', 'Moderate (4-6)', 'Severe (7-10)', 'Also have fever'],
+        category: 'hpi' as const,
+        progressPercent: 60,
+      };
+    }
+    if (patientTurnCount === 3) {
+      return {
+        text: isHindi
+          ? 'क्या आपको पहले से कोई पुरानी बीमारी जैसे डायबिटीज (शुगर), हाई बीपी, थायराइड या अस्थमा है?'
+          : 'Do you have any ongoing medical conditions such as Diabetes, High Blood Pressure, Thyroid, or Asthma?',
+        quickReplies: isHindi
+          ? ['शुगर और बीपी है', 'थायराइड है', 'कोई पुरानी बीमारी नहीं', 'अस्थमा / सांस की बीमारी']
+          : ['Diabetes & BP', 'Thyroid disorder', 'No chronic conditions', 'Asthma / Respiratory'],
+        category: 'past_history' as const,
+        progressPercent: 75,
+      };
+    }
+    if (patientTurnCount === 4) {
+      return {
+        text: isHindi
+          ? 'क्या आप अभी रोजाना कोई दवा ले रहे हैं, या आपको किसी दवा से कोई एलर्जी है?'
+          : 'Are you currently taking any daily medications, or do you have any known allergies to medicines?',
+        quickReplies: isHindi
+          ? ['नियमित बीपी/शुगर की दवा', 'कोई दवा नहीं लेता', 'दवा से एलर्जी है', 'दर्द निवारक ली है']
+          : ['Taking daily BP/Sugar meds', 'No regular medications', 'Have known drug allergies', 'Took OTC painkiller'],
+        category: 'medications' as const,
+        progressPercent: 90,
+      };
+    }
+    return {
+      text: isHindi
+        ? 'क्या परिवार में किसी को दिल की बीमारी या शुगर है, या आप डॉक्टर को कुछ और बताना चाहते हैं?'
+        : 'Is there any family history of heart disease or diabetes, or anything else you would like the doctor to know?',
+      quickReplies: isHindi
+        ? ['परिवार में शुगर/बीपी है', 'कुछ और नहीं, सब बता दिया', 'धूम्रपान/तंबाकू की आदत है']
+        : ['Family history of HTN/Diabetes', 'Nothing else to add', 'History of smoking/tobacco'],
+      category: 'family_history' as const,
+      progressPercent: 95,
+    };
+  };
+
+  // Returns true if `next` is essentially a repeat of any previous AI question.
+  const isRepeatQuestion = (next: string, prevAiTexts: string[]): boolean => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0900-\u097F\u0B80-\u0BFF ]/g, '').trim();
+    const n = norm(next);
+    return prevAiTexts.some((p) => {
+      const q = norm(p);
+      return q.length > 0 && (q === n || (n.length > 15 && (q.includes(n) || n.includes(q))));
+    });
+  };
   const checkClientRedFlags = (text: string): boolean => {
     const lower = text.toLowerCase();
     const urgentTerms = [
@@ -255,18 +326,36 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
 
       const data = await res.json();
 
+      // Anti-repeat guard: if the server/Gemini repeats a previous AI
+      // question (e.g. "How many days..." twice), force-advance using the
+      // progressive offline engine instead.
+      const prevAiTexts = updatedMessages.filter((m) => m.sender === 'ai').map((m) => m.text);
+      const patientTurnCount = updatedMessages.filter((m) => m.sender === 'patient').length;
+      let nextText: string = data.nextQuestion;
+      let nextReplies: string[] = data.quickReplies || [];
+      let nextCategory = data.category || 'hpi';
+      let nextProgress: number | undefined = data.progressPercent;
+      if (!nextText || isRepeatQuestion(nextText, prevAiTexts)) {
+        console.warn('[Converse] Repeat question detected, advancing interview step.');
+        const fb = getFallbackQuestion(patientTurnCount);
+        nextText = fb.text;
+        nextReplies = fb.quickReplies;
+        nextCategory = fb.category;
+        nextProgress = fb.progressPercent;
+      }
+
       const aiResponseMsg: ChatMessage = {
         id: `msg-ai-${Date.now()}`,
         sender: 'ai',
-        text: data.nextQuestion,
+        text: nextText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        quickReplies: data.quickReplies || [],
+        quickReplies: nextReplies,
         isRedFlag: data.isRedFlag,
-        category: data.category || 'hpi',
+        category: nextCategory,
       };
 
-      if (data.progressPercent) {
-        setProgressPercent(data.progressPercent);
+      if (nextProgress) {
+        setProgressPercent(nextProgress);
       } else {
         setProgressPercent((prev) => Math.min(prev + 18, 95));
       }
@@ -283,20 +372,20 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
       }
     } catch (err) {
       console.error('Follow up error:', err);
+      // Progressive fallback: advance based on how many answers the patient
+      // has already given, so the question is never repeated.
+      const patientTurnCount = updatedMessages.filter((m) => m.sender === 'patient').length;
+      const fb = getFallbackQuestion(patientTurnCount);
       const fallbackAiMsg: ChatMessage = {
         id: `msg-ai-${Date.now()}`,
         sender: 'ai',
-        text: isHindi
-          ? 'कृपया बताएं कि यह परेशानी कितने दिनों से है, और क्या आप पहले से कोई नियमित दवा ले रहे हैं?'
-          : 'How many days have you had this issue, and are you currently taking any regular medications?',
+        text: fb.text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        quickReplies: isHindi
-          ? ['2-3 दिनों से', 'आज से ही', 'नियमित दवाएं लेता हूँ', 'कोई दवा नहीं']
-          : ['Past 2-3 days', 'Since today', 'Taking regular daily meds', 'No medications'],
-        category: 'hpi',
+        quickReplies: fb.quickReplies,
+        category: fb.category,
       };
       setMessages([...updatedMessages, fallbackAiMsg]);
-      setProgressPercent((prev) => Math.min(prev + 20, 90));
+      setProgressPercent(fb.progressPercent);
     } finally {
       setIsAiTyping(false);
     }

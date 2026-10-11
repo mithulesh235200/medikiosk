@@ -362,6 +362,7 @@ Clinical Protocol:
 4. Provide the SINGLE next empathetic question in ${isTamil ? 'simple spoken Tamil (தமிழ் script)' : isHindi ? 'simple spoken Hindi (Devanagari script)' : 'simple natural English'}.
 5. Provide 3 to 4 quick-reply choices for touchscreen tapping in the chosen language.
 6. Estimate intake progress percentage (15% to 95%).
+7. CRITICAL — NEVER REPEAT: review the Conversation above. DO NOT ask about duration/onset, severity, medications, or any topic the patient already answered or that a previous AI message already asked. Always advance to the next unanswered SOCRATES step (severity → associated symptoms → past history → medications → family history).
 
 Respond strictly with valid JSON:
 {
@@ -374,7 +375,7 @@ Respond strictly with valid JSON:
 }`;
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -384,7 +385,21 @@ Respond strictly with valid JSON:
 
       const responseText = response.text || '{}';
       const parsed = JSON.parse(responseText);
-      return res.json(parsed);
+      // Server-side anti-repeat guard: if Gemini echoed a previous AI
+      // question, discard it and fall through to the progressive rule engine.
+      try {
+        const prevAi = ((conversation || []).filter((m: any) => m.sender === 'ai').map((m: any) => String(m.text || '')));
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0900-\u097F\u0B80-\u0BFF ]/g, '').trim();
+        const nq = norm(String(parsed?.nextQuestion || ''));
+        const isRepeat = nq.length > 0 && prevAi.some((p: string) => {
+          const q = norm(p);
+          return q && (q === nq || (nq.length > 15 && (q.includes(nq) || nq.includes(q))));
+        });
+        if (parsed?.nextQuestion && !isRepeat) return res.json(parsed);
+        if (isRepeat) console.warn('[follow-up] Gemini repeated a question, using rule engine.');
+      } catch {
+        if (parsed?.nextQuestion) return res.json(parsed);
+      }
     } catch (err) {
       console.error('Gemini follow-up error:', err);
     }
@@ -633,7 +648,7 @@ Respond ONLY with valid JSON strictly conforming to this structure:
 }`;
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -743,7 +758,7 @@ Respond ONLY with valid JSON:
 }`;
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0.1 },
       });
@@ -788,7 +803,7 @@ Respond strictly in JSON format:
 }`;
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
         contents: [
           {
             role: 'user',

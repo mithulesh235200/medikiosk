@@ -63,9 +63,9 @@ export function getGemini(): GoogleGenAI | null {
   return geminiClient;
 }
 
-/** Current Gemini model. gemini-3.8-flash is current; override via env. */
+/** Current Gemini model. Override via GEMINI_MODEL env. */
 export function geminiModel(): string {
-  return getEnv('GEMINI_MODEL') || 'gemini-3.8-flash';
+  return getEnv('GEMINI_MODEL') || 'gemini-2.0-flash';
 }
 
 // ---------------------------------------------------------------------------

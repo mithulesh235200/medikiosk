@@ -74,13 +74,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const prompt = `You are MediKiosk AI, empathetic clinical OPD triage assistant at an Indian hospital.
 Patient: ${demographics?.name || 'Patient'}, Age ${demographics?.age || '?'}, ${demographics?.gender || ''}, Language ${lang === 'ta' ? 'Tamil' : lang === 'hi' ? 'Hindi' : 'English'}, Body region ${bodyRegion || 'general'}, Vitals ${vitals ? JSON.stringify(vitals) : 'none'}.
 Conversation: ${JSON.stringify(conversation)}
+CRITICAL: NEVER repeat a question already asked by the AI or a topic the patient already answered. Advance to the next unanswered SOCRATES step (severity → associated symptoms → past history → medications → family history).
 Ask ONE next SOCRATES-based question in ${lang === 'ta' ? 'Tamil' : lang === 'hi' ? 'Hindi (Devanagari)' : 'English'}, 3-4 quick replies, progress 15-95%, red-flag detection. Respond ONLY JSON: {"nextQuestion":"...","quickReplies":[...],"isRedFlag":false,"redFlagReason":null,"category":"hpi","progressPercent":40}`;
       const response = await ai.models.generateContent({
         model: geminiModel(),
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0.2 },
       });
-      return res.status(200).json(JSON.parse(response.text || '{}'));
+      const parsed = JSON.parse(response.text || '{}');
+      try {
+        const prevAi = ((conversation || []).filter((m: any) => m.sender === 'ai').map((m: any) => String(m.text || '')));
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0900-\u097F\u0B80-\u0BFF ]/g, '').trim();
+        const nq = norm(String((parsed as any)?.nextQuestion || ''));
+        const isRepeat = nq.length > 0 && prevAi.some((p: string) => {
+          const q = norm(p);
+          return q && (q === nq || (nq.length > 15 && (q.includes(nq) || nq.includes(q))));
+        });
+        if ((parsed as any)?.nextQuestion && !isRepeat) return res.status(200).json(parsed);
+        if (isRepeat) console.warn('[follow-up] Gemini repeated a question, using rule engine.');
+      } catch {
+        if ((parsed as any)?.nextQuestion) return res.status(200).json(parsed);
+      }
     } catch (e) {
       console.error('Gemini follow-up error:', e);
     }
