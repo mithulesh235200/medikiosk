@@ -259,6 +259,47 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
       return q.length > 0 && (q === n || (n.length > 15 && (q.includes(n) || n.includes(q))));
     });
   };
+
+  // Interview-complete signal: patient said "nothing else / done", or has
+  // answered all 5 SOCRATES steps (duration → severity → history → meds → family).
+  const isCompletionSignal = (text: string, patientTurnCount: number): boolean => {
+    if (patientTurnCount >= 6) return true;
+    const lower = text.toLowerCase().trim();
+    const phrases = [
+      'nothing else to add', 'nothing else', 'nothing to add', 'no more', 'done',
+      "that's all", 'that is all', 'all done', 'no family history', 'no, done',
+      'कुछ और नहीं', 'सब बता दिया', 'हो गया',
+      'வேறு எதுவும் இல்லை', 'அவ்வளவுதான்', 'முடிந்தது',
+    ];
+    if (phrases.some((p) => lower.includes(p))) return true;
+    // Answered the family-history step (5th answer) with any short reply
+    if (patientTurnCount >= 5) return true;
+    return false;
+  };
+
+  const getCompletionMessage = () => ({
+    text: isHindi
+      ? 'धन्यवाद! आपकी क्लिनिकल हिस्ट्री पूरी हो गई है। कृपया आगे बढ़ने के लिए ऊपर "Proceed to Document Scan" बटन दबाएं और अपने पर्चे या रिपोर्ट अपलोड करें।'
+      : 'Thank you! Your clinical history is complete. Please tap "Proceed to Document Scan" above to upload your prescriptions or reports.',
+    quickReplies: isHindi ? ['डॉक्यूमेंट स्कैन पर जाएं →'] : ['Proceed to Document Scan →'],
+    category: 'general' as const,
+    progressPercent: 100,
+  });
+
+  const postCompletionMessage = (updatedMsgs: ChatMessage[]) => {
+    const done = getCompletionMessage();
+    const doneMsg: ChatMessage = {
+      id: `msg-ai-done-${Date.now()}`,
+      sender: 'ai',
+      text: done.text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      quickReplies: done.quickReplies,
+      category: done.category,
+    };
+    setMessages([...updatedMsgs, doneMsg]);
+    setProgressPercent(100);
+    speakMessage(doneMsg.id, doneMsg.text);
+  };
   const checkClientRedFlags = (text: string): boolean => {
     const lower = text.toLowerCase();
     const urgentTerms = [
@@ -297,6 +338,15 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
     setMessages(updatedMessages);
     setInputText('');
 
+    // Interview finished → skip the API and close out with a directive to
+    // go to Document Scan (user asked: after "nothing else", AI must say so).
+    const doneCount = updatedMessages.filter((m) => m.sender === 'patient').length;
+    if (isCompletionSignal(text, doneCount)) {
+      setIsAiTyping(false);
+      postCompletionMessage(updatedMessages);
+      return;
+    }
+
     if (isUrgent) {
       onRedFlagDetected(
         language === 'ta'
@@ -326,11 +376,17 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
 
       const data = await res.json();
 
+      // Server says interview is done, or local signal agrees → completion.
+      const patientTurnCount = updatedMessages.filter((m) => m.sender === 'patient').length;
+      if ((data as any).isComplete || isCompletionSignal(text, patientTurnCount)) {
+        postCompletionMessage(updatedMessages);
+        return;
+      }
+
       // Anti-repeat guard: if the server/Gemini repeats a previous AI
       // question (e.g. "How many days..." twice), force-advance using the
       // progressive offline engine instead.
       const prevAiTexts = updatedMessages.filter((m) => m.sender === 'ai').map((m) => m.text);
-      const patientTurnCount = updatedMessages.filter((m) => m.sender === 'patient').length;
       let nextText: string = data.nextQuestion;
       let nextReplies: string[] = data.quickReplies || [];
       let nextCategory = data.category || 'hpi';
@@ -564,17 +620,26 @@ export const ConverseScreen: React.FC<ConverseScreenProps> = ({
               {t.quickRepliesLabel}
             </span>
             <div className="flex flex-wrap gap-2">
-              {latestAiMessage.quickReplies.map((replyText, idx) => (
+              {latestAiMessage.quickReplies.map((replyText, idx) => {
+                const isProceedAction =
+                  replyText.toLowerCase().includes('proceed to document scan') ||
+                  replyText.includes('डॉक्यूमेंट स्कैन');
+                return (
                 <button
                   key={idx}
                   id={`quick-reply-btn-${idx}`}
                   type="button"
-                  onClick={() => handleSendMessage(replyText)}
-                  className="px-4 py-2 rounded-xl bg-slate-50 hover:bg-teal-50 text-slate-800 hover:text-teal-900 border-2 border-slate-200 hover:border-teal-400 font-bold text-xs sm:text-sm transition-all shadow-2xs active:scale-95 cursor-pointer"
+                  onClick={() => (isProceedAction ? onProceedToScan() : handleSendMessage(replyText))}
+                  className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-2xs active:scale-95 cursor-pointer ${
+                    isProceedAction
+                      ? 'bg-teal-600 hover:bg-teal-700 text-white border-2 border-teal-600 animate-pulse'
+                      : 'bg-slate-50 hover:bg-teal-50 text-slate-800 hover:text-teal-900 border-2 border-slate-200 hover:border-teal-400'
+                  }`}
                 >
                   {replyText}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

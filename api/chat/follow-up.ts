@@ -56,10 +56,25 @@ function fallback(conversation: Array<{ sender: string; text: string }>, demogra
     },
   };
   if (steps[patientTurns.length]) return steps[patientTurns.length];
+  if (patientTurns.length === 4) {
+    return {
+      nextQuestion: isTamil ? 'தினமும் மாத்திரை எடுக்கிறீர்களா, ஒவ்வாமை உள்ளதா?' : isHindi ? 'रोज़ दवा लेते हैं या एलर्जी है?' : 'Taking daily medications or any drug allergies?',
+      quickReplies: isTamil ? ['தினசரி மாத்திரை', 'எதுவுமில்லை', 'ஒவ்வாமை உண்டு'] : isHindi ? ['रोज़ दवा', 'कोई नहीं', 'एलर्जी है'] : ['Daily meds', 'None', 'Have allergies'],
+      isRedFlag: false, category: 'medications', progressPercent: 90,
+    };
+  }
+  if (patientTurns.length === 5) {
+    return {
+      nextQuestion: isTamil ? 'குடும்பத்தில் இதய நோய் / சர்க்கரை உண்டா, வேறு ஏதேனும் உண்டா?' : isHindi ? 'परिवार में दिल की बीमारी या शुगर है, या कुछ और बताना है?' : 'Any family history of heart disease or diabetes, or anything else for the doctor?',
+      quickReplies: isTamil ? ['குடும்ப வரலாறு உண்டு', 'வேறு எதுவும் இல்லை', 'புகையிலை பழக்கம்'] : isHindi ? ['परिवार में है', 'कुछ और नहीं', 'धूम्रपान की आदत'] : ['Family history of HTN/Diabetes', 'Nothing else to add', 'Smoking/tobacco'],
+      isRedFlag: false, category: 'family_history', progressPercent: 95,
+    };
+  }
+  // Interview complete (6+ answers or "nothing else") → direct to scan.
   return {
-    nextQuestion: isTamil ? 'தினமும் மாத்திரை எடுக்கிறீர்களா, ஒவ்வாமை உள்ளதா?' : isHindi ? 'रोज़ दवा लेते हैं या एलर्जी है?' : 'Taking daily medications or any drug allergies?',
-    quickReplies: isTamil ? ['தினசரி மாத்திரை', 'எதுவுமில்லை', 'ஒவ்வாமை உண்டு'] : isHindi ? ['रोज़ दवा', 'कोई नहीं', 'एलर्जी है'] : ['Daily meds', 'None', 'Have allergies'],
-    isRedFlag: false, category: 'medications', progressPercent: 90,
+    nextQuestion: isTamil ? 'நன்றி! வரலாறு நிறைவடைந்தது. "Proceed to Document Scan" அழுத்தவும்.' : isHindi ? 'धन्यवाद! हिस्ट्री पूरी हो गई है। कृपया "Proceed to Document Scan" दबाएं।' : 'Thank you! Your clinical history is complete. Please tap "Proceed to Document Scan" above to upload your prescriptions or reports.',
+    quickReplies: isHindi ? ['डॉक्यूमेंट स्कैन पर जाएं →'] : ['Proceed to Document Scan →'],
+    isRedFlag: false, isComplete: true, category: 'general', progressPercent: 100,
   };
 }
 
@@ -74,8 +89,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const prompt = `You are MediKiosk AI, empathetic clinical OPD triage assistant at an Indian hospital.
 Patient: ${demographics?.name || 'Patient'}, Age ${demographics?.age || '?'}, ${demographics?.gender || ''}, Language ${lang === 'ta' ? 'Tamil' : lang === 'hi' ? 'Hindi' : 'English'}, Body region ${bodyRegion || 'general'}, Vitals ${vitals ? JSON.stringify(vitals) : 'none'}.
 Conversation: ${JSON.stringify(conversation)}
-CRITICAL: NEVER repeat a question already asked by the AI or a topic the patient already answered. Advance to the next unanswered SOCRATES step (severity → associated symptoms → past history → medications → family history).
-Ask ONE next SOCRATES-based question in ${lang === 'ta' ? 'Tamil' : lang === 'hi' ? 'Hindi (Devanagari)' : 'English'}, 3-4 quick replies, progress 15-95%, red-flag detection. Respond ONLY JSON: {"nextQuestion":"...","quickReplies":[...],"isRedFlag":false,"redFlagReason":null,"category":"hpi","progressPercent":40}`;
+CRITICAL: NEVER repeat a question already asked by the AI or a topic the patient already answered. Advance to the next unanswered SOCRATES step (severity → associated symptoms → past history → medications → family history). If the patient said "nothing else / done" or has given 5+ answers, close the interview: set "isComplete":true, progress 100, and tell them to tap "Proceed to Document Scan".
+Ask ONE next SOCRATES-based question in ${lang === 'ta' ? 'Tamil' : lang === 'hi' ? 'Hindi (Devanagari)' : 'English'}, 3-4 quick replies, progress 15-100%, red-flag detection. Respond ONLY JSON: {"nextQuestion":"...","quickReplies":[...],"isRedFlag":false,"redFlagReason":null,"category":"hpi","progressPercent":40,"isComplete":false}`;
       const response = await ai.models.generateContent({
         model: geminiModel(),
         contents: prompt,

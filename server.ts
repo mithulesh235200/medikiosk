@@ -534,6 +534,24 @@ Respond strictly with valid JSON:
     });
   }
 
+  // Interview complete: patient answered the family-history step or said
+  // "nothing else / done" → direct them to Document Scan, don't ask more.
+  const donePhrases = ['nothing else', 'nothing to add', 'no more', "that's all", 'that is all', 'all done', 'कुछ और नहीं', 'सब बता दिया', 'வேறு எதுவும் இல்லை', 'அவ்வளவுதான்'];
+  if (patientTurns.length >= 6 || donePhrases.some((p) => latestText.includes(p))) {
+    return res.json({
+      nextQuestion: isTamil
+        ? 'நன்றி! உங்கள் மருத்துவ வரலாறு நிறைவடைந்தது. மேலே உள்ள "Proceed to Document Scan" பொத்தானை அழுத்தி உங்கள் மருந்துச் சீட்டுகளை பதிவேற்றவும்.'
+        : isHindi
+        ? 'धन्यवाद! आपकी क्लिनिकल हिस्ट्री पूरी हो गई है। कृपया ऊपर "Proceed to Document Scan" बटन दबाएं और अपने पर्चे या रिपोर्ट अपलोड करें।'
+        : 'Thank you! Your clinical history is complete. Please tap "Proceed to Document Scan" above to upload your prescriptions or reports.',
+      quickReplies: isHindi ? ['डॉक्यूमेंट स्कैन पर जाएं →'] : ['Proceed to Document Scan →'],
+      isRedFlag: false,
+      isComplete: true,
+      category: 'general',
+      progressPercent: 100,
+    });
+  }
+
   return res.json({
     nextQuestion: isTamil
       ? 'மிக்க நன்றி. உங்கள் குடும்பத்தில் யாருக்காவது இதய நோய் அல்லது சர்க்கரை நோய் உள்ளதா, அல்லது மருத்துவரிடம் கூற விரும்பும் வேறு ஏதேனும் தகவல் உள்ளதா?'
