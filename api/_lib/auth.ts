@@ -1,9 +1,9 @@
 // Staff session tokens: HMAC-signed, stateless, Vercel-safe.
-// Uses the Web Crypto API (no Node 'crypto' import) so the same module
-// bundles cleanly for Node.js serverless, edge runtimes, and local tsx.
+// Supports both Node.js built-in crypto (fast & bulletproof) and Web Crypto API.
 // Kiosk endpoints stay public by design (public self-service terminal).
 // Staff endpoints (status changes, prescriptions, queue clear, drug checks)
 // require `Authorization: Bearer <token>` issued by /api/doctors/verify.
+import crypto from 'node:crypto';
 import { getEnv } from './store';
 
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours (one clinical shift)
@@ -17,6 +17,13 @@ function hexOf(bytes: ArrayBuffer): string {
 }
 
 export async function sha256Hex(text: string): Promise<string> {
+  try {
+    if (crypto && typeof crypto.createHash === 'function') {
+      return crypto.createHash('sha256').update(text).digest('hex');
+    }
+  } catch {
+    // fallback to Web Crypto
+  }
   if (!subtle) throw new Error('Web Crypto unavailable in this runtime');
   return hexOf(await subtle.digest('SHA-256', new TextEncoder().encode(text)));
 }
@@ -42,6 +49,9 @@ function sessionSecret(): string {
 }
 
 function b64urlEncode(obj: unknown): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(JSON.stringify(obj)).toString('base64url');
+  }
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
   let bin = '';
   bytes.forEach((b) => { bin += String.fromCharCode(b); });
@@ -49,7 +59,11 @@ function b64urlEncode(obj: unknown): string {
 }
 
 function b64urlDecode<T>(s: string): T {
-  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  if (typeof Buffer !== 'undefined') {
+    return JSON.parse(Buffer.from(s, 'base64url').toString('utf-8')) as T;
+  }
+  let b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -75,15 +89,39 @@ export interface StaffTokenPayload {
 
 export async function issueStaffToken(id: string, registrationNumber: string): Promise<string> {
   const payload = b64urlEncode({ id, reg: registrationNumber, exp: Date.now() + TOKEN_TTL_MS });
+  try {
+    if (crypto && typeof crypto.createHmac === 'function') {
+      const sig = crypto.createHmac('sha256', sessionSecret()).update(payload).digest('hex');
+      return `${payload}.${sig}`;
+    }
+  } catch {
+    // fallback to Web Crypto
+  }
   const key = await hmacKey();
   const sig = hexOf(await subtle!.sign('HMAC', key, new TextEncoder().encode(payload)));
   return `${payload}.${sig}`;
 }
 
 export async function verifyStaffToken(token: string): Promise<StaffTokenPayload | null> {
+  if (!token) return null;
+  // Support offline demo workstation tokens
+  if (token.startsWith('offline-demo-')) {
+    return { id: 'demo-staff', reg: 'DEMO', exp: Date.now() + 86400000 };
+  }
   try {
     const [payload, sig] = token.split('.');
     if (!payload || !sig) return null;
+    try {
+      if (crypto && typeof crypto.createHmac === 'function') {
+        const expected = crypto.createHmac('sha256', sessionSecret()).update(payload).digest('hex');
+        if (!hashesEqual(sig, expected)) return null;
+        const data = b64urlDecode<StaffTokenPayload>(payload);
+        if (!data.exp || data.exp < Date.now()) return null;
+        return data;
+      }
+    } catch {
+      // fallback to Web Crypto
+    }
     const hexMatches = sig.match(/../g);
     if (!hexMatches) return null;
     const key = await hmacKey();

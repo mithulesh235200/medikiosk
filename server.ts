@@ -146,49 +146,59 @@ app.get('/api/doctors', (req, res) => {
 
 // Staff login verification — issues a signed session token
 app.post('/api/doctors/verify', async (req, res) => {
-  const { registrationNumber, pin } = req.body ?? {};
-  if (!registrationNumber || !pin) {
-    return res.status(400).json({ error: 'Registration number and PIN are required' });
+  try {
+    const { registrationNumber, pin } = req.body ?? {};
+    if (!registrationNumber || !pin) {
+      return res.status(400).json({ error: 'Registration number and PIN are required' });
+    }
+    const doctor = doctorStore.find(
+      (d) => d.registrationNumber === String(registrationNumber).trim() && d.active
+    );
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor not found. Check the registration number or register as a custom doctor.' });
+    }
+    if (!hashesEqual(await sha256Hex(String(pin)), doctor.pinHash)) {
+      return res.status(401).json({ error: 'Incorrect PIN for this registration number.' });
+    }
+    const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
+    res.json({ doctor: publicDoctor(doctor), token });
+  } catch (e) {
+    console.error('[server verify] error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Verification failed' });
   }
-  const doctor = doctorStore.find(
-    (d) => d.registrationNumber === String(registrationNumber).trim() && d.active
-  );
-  if (!doctor) {
-    return res.status(404).json({ error: 'Doctor not found. Check the registration number or register as a custom doctor.' });
-  }
-  if (!hashesEqual(await sha256Hex(String(pin)), doctor.pinHash)) {
-    return res.status(401).json({ error: 'Incorrect PIN for this registration number.' });
-  }
-  const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
-  res.json({ doctor: publicDoctor(doctor), token });
 });
 
 // Custom doctor self-registration (disable in production via ALLOW_DOCTOR_SELF_REGISTER=false)
 app.post('/api/doctors/register', async (req, res) => {
-  if (process.env.ALLOW_DOCTOR_SELF_REGISTER === 'false') {
-    return res.status(403).json({ error: 'Self-registration is disabled. Ask the administrator to provision your account.' });
+  try {
+    if (process.env.ALLOW_DOCTOR_SELF_REGISTER === 'false') {
+      return res.status(403).json({ error: 'Self-registration is disabled. Ask the administrator to provision your account.' });
+    }
+    const { name, title, department, roomNumber, registrationNumber, pin } = req.body ?? {};
+    if (!name || !registrationNumber || !roomNumber || !pin || String(pin).length < 4) {
+      return res.status(400).json({ error: 'Name, registration number, room number and a 4+ character PIN are required' });
+    }
+    if (doctorStore.some((d) => d.registrationNumber === String(registrationNumber).trim())) {
+      return res.status(409).json({ error: 'This registration number already exists — sign in with its PIN.' });
+    }
+    const doctor: StaffDoctorRow = {
+      id: `doc-${Date.now()}`,
+      name: String(name).trim().startsWith('Dr.') ? String(name).trim() : `Dr. ${String(name).trim()}`,
+      title: String(title || 'Consultant Physician').trim(),
+      department: String(department || 'General OPD').trim(),
+      roomNumber: String(roomNumber).trim(),
+      registrationNumber: String(registrationNumber).trim(),
+      pinHash: await sha256Hex(String(pin)),
+      active: true,
+    };
+    doctorStore.push(doctor);
+    saveDoctorsToDisk(doctorStore);
+    const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
+    res.status(201).json({ doctor: publicDoctor(doctor), token });
+  } catch (e) {
+    console.error('[server register] error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Registration failed' });
   }
-  const { name, title, department, roomNumber, registrationNumber, pin } = req.body ?? {};
-  if (!name || !registrationNumber || !roomNumber || !pin || String(pin).length < 4) {
-    return res.status(400).json({ error: 'Name, registration number, room number and a 4+ character PIN are required' });
-  }
-  if (doctorStore.some((d) => d.registrationNumber === String(registrationNumber).trim())) {
-    return res.status(409).json({ error: 'This registration number already exists — sign in with its PIN.' });
-  }
-  const doctor: StaffDoctorRow = {
-    id: `doc-${Date.now()}`,
-    name: String(name).trim().startsWith('Dr.') ? String(name).trim() : `Dr. ${String(name).trim()}`,
-    title: String(title || 'Consultant Physician').trim(),
-    department: String(department || 'General OPD').trim(),
-    roomNumber: String(roomNumber).trim(),
-    registrationNumber: String(registrationNumber).trim(),
-    pinHash: await sha256Hex(String(pin)),
-    active: true,
-  };
-  doctorStore.push(doctor);
-  saveDoctorsToDisk(doctorStore);
-  const token = await issueStaffToken(doctor.id, doctor.registrationNumber);
-  res.status(201).json({ doctor: publicDoctor(doctor), token });
 });
 
 // Patient queue list (Emergency / Red-Flag first, then by registration time)
