@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { getGemini, geminiModel, setCors } from '../_lib/store';
+import { getGemini, geminiModel, setCors, parseBody } from '../_lib/store';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { conversation = [], demographics = {}, documents = [], bodyRegion, vitals } = req.body ?? {};
+  const { conversation = [], demographics = {}, documents = [], bodyRegion, vitals } = parseBody<any>(req.body);
   const ai = getGemini();
   if (ai) {
     try {
@@ -39,4 +39,3 @@ Produce OPD sheet JSON ONLY: {"chiefComplaint":"...","historyOfPresentingIllness
     patientPlainLanguageReadbackTamil: `நீங்கள் ${first} காரணமாக வந்துள்ளீர்கள்.`,
   });
 }
-

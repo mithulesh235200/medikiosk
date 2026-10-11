@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { getGemini, geminiModel, setCors } from '../_lib/store';
+import { getGemini, geminiModel, setCors, parseBody } from '../_lib/store';
 
 function fallback(conversation: Array<{ sender: string; text: string }>, demographics: Record<string, string>, bodyRegion?: string, vitals?: Record<string, number>) {
   const lang = demographics?.preferredLanguage;
@@ -66,7 +66,7 @@ function fallback(conversation: Array<{ sender: string; text: string }>, demogra
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { conversation = [], demographics = {}, bodyRegion, vitals } = req.body ?? {};
+  const { conversation = [], demographics = {}, bodyRegion, vitals } = parseBody<any>(req.body);
   const lang = demographics?.preferredLanguage;
   const ai = getGemini();
   if (ai) {
@@ -87,4 +87,3 @@ Ask ONE next SOCRATES-based question in ${lang === 'ta' ? 'Tamil' : lang === 'hi
   }
   return res.status(200).json(fallback(conversation, demographics, bodyRegion, vitals));
 }
-

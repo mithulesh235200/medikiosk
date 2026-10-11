@@ -331,11 +331,9 @@ export async function createDoctor(input: Omit<DoctorRow, 'active'>): Promise<Do
         pin_hash: row.pinHash,
       } as never).select().single();
       if (!error && data) return doctorFromRow(data as Record<string, unknown>);
-      console.error('[store] doctor create error:', error?.message);
-      throw new Error(error?.message || 'Failed to create doctor');
+      console.error('[store] doctor create error (falling back to memory):', error?.message);
     } catch (e) {
-      if (e instanceof Error && e.message !== 'Failed to create doctor') console.error('[store] doctor create exception:', e);
-      throw e;
+      console.error('[store] doctor create exception (falling back to memory):', e);
     }
   }
   if (memoryDoctors.some((d) => d.registrationNumber === row.registrationNumber)) {
@@ -343,6 +341,20 @@ export async function createDoctor(input: Omit<DoctorRow, 'active'>): Promise<Do
   }
   memoryDoctors.push(row);
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// Body parser helper for Vercel functions (handles string/parsed bodies)
+// ---------------------------------------------------------------------------
+export function parseBody<T = Record<string, any>>(body: unknown): T {
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body) as T;
+    } catch {
+      return {} as T;
+    }
+  }
+  return (body as T) || ({} as T);
 }
 
 // ---------------------------------------------------------------------------
@@ -358,4 +370,5 @@ export function setCors(req: { method?: string; headers: Record<string, string |
   }
   return false;
 }
+
 

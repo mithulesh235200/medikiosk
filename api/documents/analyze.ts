@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { getGemini, geminiModel, setCors } from '../_lib/store';
+import { getGemini, geminiModel, setCors, parseBody } from '../_lib/store';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { imageBase64, mimeType = 'image/jpeg' } = req.body ?? {};
+  const { imageBase64, mimeType = 'image/jpeg' } = parseBody<any>(req.body);
   const ai = getGemini();
   if (ai && imageBase64) {
     try {
@@ -29,4 +29,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     extractedTextSummary: 'Uploaded document attached to patient file.',
   });
 }
-

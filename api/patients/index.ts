@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { listPatients, upsertPatient, clearPatients, setCors } from '../_lib/store';
+import { listPatients, upsertPatient, clearPatients, setCors, parseBody } from '../_lib/store';
 import { requireStaff } from '../_lib/auth';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -12,7 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'POST') {
     // Public kiosk intake — open by design (self-service terminal).
-    const body = req.body;
+    const body = parseBody<any>(req.body);
     if (!body || !body.id) return res.status(400).json({ error: 'Invalid patient record' });
     // Basic server-side validation
     if (!body.demographics || !body.status) {
@@ -34,4 +34,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   return res.status(405).json({ error: 'Method not allowed' });
 }
-

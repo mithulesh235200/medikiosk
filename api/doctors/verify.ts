@@ -1,14 +1,13 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { setCors } from '../_lib/store';
+import { setCors, getDoctorByReg, parseBody } from '../_lib/store';
 import { hashesEqual, issueStaffToken, sha256Hex } from '../_lib/auth';
-import { getDoctorByReg } from '../_lib/store';
 
 /** POST /api/doctors/verify { registrationNumber, pin } -> { doctor, token } */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req as never, res as never)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
-    const { registrationNumber, pin } = req.body ?? {};
+    const { registrationNumber, pin } = parseBody<any>(req.body);
     if (!registrationNumber || !pin) {
       return res.status(400).json({ error: 'Registration number and PIN are required' });
     }

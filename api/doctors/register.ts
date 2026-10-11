@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '../_lib/vercel';
-import { createDoctor, getDoctorByReg, setCors, getEnv } from '../_lib/store';
+import { createDoctor, getDoctorByReg, setCors, getEnv, parseBody } from '../_lib/store';
 import { issueStaffToken, sha256Hex } from '../_lib/auth';
 
 /**
@@ -14,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Self-registration is disabled. Ask the administrator to provision your account.' });
   }
   try {
-    const { name, title, department, roomNumber, registrationNumber, pin } = req.body ?? {};
+    const { name, title, department, roomNumber, registrationNumber, pin } = parseBody<any>(req.body);
     if (!name || !registrationNumber || !roomNumber || !pin || String(pin).length < 4) {
       return res.status(400).json({ error: 'Name, registration number, room number and a 4+ character PIN are required' });
     }

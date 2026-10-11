@@ -84,10 +84,12 @@ export async function verifyStaffToken(token: string): Promise<StaffTokenPayload
   try {
     const [payload, sig] = token.split('.');
     if (!payload || !sig) return null;
+    const hexMatches = sig.match(/../g);
+    if (!hexMatches) return null;
     const key = await hmacKey();
     const ok = await subtle!.verify(
       'HMAC', key,
-      new Uint8Array(sig.match(/../g)!.map((h) => parseInt(h, 16))),
+      new Uint8Array(hexMatches.map((h) => parseInt(h, 16))),
       new TextEncoder().encode(payload),
     );
     if (!ok) return null;

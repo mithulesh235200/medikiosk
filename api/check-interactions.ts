@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './_lib/vercel';
-import { getGemini, geminiModel, setCors } from './_lib/store';
+import { getGemini, geminiModel, setCors, parseBody } from './_lib/store';
 import { requireStaff } from './_lib/auth';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -8,7 +8,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!(await requireStaff(req.headers as never))) {
     return res.status(401).json({ error: 'Staff authentication required' });
   }
-  const { currentMedications = [], proposedPrescription = '', knownAllergies = [] } = req.body ?? {};
+  const { currentMedications = [], proposedPrescription = '', knownAllergies = [] } = parseBody<any>(req.body);
   const ai = getGemini();
   if (ai && (proposedPrescription || currentMedications.length > 0)) {
     try {
@@ -34,4 +34,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   return res.status(200).json({ hasAlerts: alerts.length > 0, alerts });
 }
-

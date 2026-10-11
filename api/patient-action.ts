@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './_lib/vercel';
-import { getPatient, patchPatient, setCors } from './_lib/store';
+import { getPatient, patchPatient, setCors, parseBody } from './_lib/store';
 import { requireStaff } from './_lib/auth';
 
 /**
@@ -21,8 +21,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const current = await getPatient(id);
     if (!current) return res.status(404).json({ error: 'Patient not found' });
 
+    const body = parseBody<any>(req.body);
+
     if (action === 'status') {
-      const { status } = req.body ?? {};
+      const { status } = body;
       if (!['waiting', 'in_consultation', 'seen', 'referred'].includes(status)) {
         return res.status(400).json({ error: 'Invalid status' });
       }
@@ -36,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'annotate') {
-      const { doctorNotes, doctorPrescription } = req.body ?? {};
+      const { doctorNotes, doctorPrescription } = body;
       const patch: Record<string, unknown> = {};
       if (doctorNotes !== undefined) patch.doctorNotes = String(doctorNotes).slice(0, 10000);
       if (doctorPrescription !== undefined) patch.doctorPrescription = String(doctorPrescription).slice(0, 10000);
